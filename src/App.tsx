@@ -1,6 +1,10 @@
-import { SuspenseQuery, queryOptions } from '@suspensive/react-query'
+import {
+  QueryErrorBoundary,
+  SuspenseQuery,
+  queryOptions,
+} from '@suspensive/react-query'
 import './App.css'
-import axios from 'axios'
+import axios, { AxiosError } from 'axios'
 import {
   ErrorBoundary,
   Suspense,
@@ -10,7 +14,7 @@ import { z, ZodError } from 'zod'
 import { useForm } from 'react-hook-form'
 import { DevTool } from '@hookform/devtools'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useLocalStorage } from 'usehooks-ts'
+import { useLocalStorage, useTimeout } from 'usehooks-ts'
 
 const githubUserSchema = z.object({
   login: z.string(),
@@ -76,7 +80,10 @@ function App() {
 
   return (
     <>
-      <h1>Co-author Generator(GitHub)</h1>
+      <h1 style={{ fontSize: 40, wordBreak: 'break-word' }}>
+        Co-author Generator (GitHub)
+      </h1>
+
       <form
         action="submit"
         onSubmit={handleSubmit((formData) => {
@@ -94,13 +101,15 @@ function App() {
               GitHub Username
             </label>
           </div>
-          <input
-            style={{ width: '100%', fontSize: 24 }}
-            id="username"
-            type="text"
-            placeholder="manudeli"
-            {...register('username')}
-          />
+          <span style={{ display: 'block' }}>
+            <input
+              style={{ width: '100%', fontSize: 18 }}
+              id="username"
+              type="text"
+              placeholder="manudeli"
+              {...register('username')}
+            />
+          </span>
         </div>
         <br />
         <div>
@@ -109,13 +118,15 @@ function App() {
               Display Name
             </label>
           </div>
-          <input
-            style={{ width: '100%', fontSize: 24 }}
-            id="realname"
-            type="text"
-            placeholder="Jonghyeon Ko"
-            {...register('realname')}
-          />
+          <span style={{ display: 'block' }}>
+            <input
+              style={{ width: '100%', fontSize: 18 }}
+              id="realname"
+              type="text"
+              placeholder="Jonghyeon Ko"
+              {...register('realname')}
+            />
+          </span>
         </div>
         <br />
         <button style={{ width: '100%' }} type="submit">
@@ -126,31 +137,55 @@ function App() {
       {githubCoAuthors.length > 0
         ? '⌨️ Copy & Paste on commit message ⌨️'
         : null}
-      <section style={{ border: '1px solid white' }}>
+      <section
+        style={{ border: '1px solid white', padding: 12, borderRadius: 8 }}
+      >
+        {githubCoAuthors.length === 0 ? (
+          <p style={{ opacity: 0.6 }}>
+            Please add new one as Co-author by upper form
+          </p>
+        ) : null}
         {githubCoAuthors.map(({ realname, username }) => (
-          <div>
-            <ErrorBoundary fallback={ErrorBoundaryFallback}>
-              <Suspense fallback={'loading...'}>
-                <SuspenseQuery
-                  {...query.githubUser(username)}
-                  select={githubUserSchema.parse}
-                >
-                  {({ data: githubUser }) => (
-                    <>{`Co-authored-by: ${realname} <${githubUser.id}+${username}@users.noreply.github.com>`}</>
-                  )}
-                </SuspenseQuery>
-              </Suspense>
-              <button
-                onClick={() =>
-                  setGithubCoAuthors((prev) =>
-                    prev.filter((authors) => authors.username !== username)
-                  )
-                }
-                style={{ fontSize: 12, userSelect: 'none' }}
+          <div key={username} style={{ textAlign: 'left' }}>
+            <QueryErrorBoundary
+              shouldCatch={AxiosError}
+              fallback={() => (
+                <AxiosErrorBoundaryFallback
+                  username={username}
+                  onRemove={() =>
+                    setGithubCoAuthors((prev) =>
+                      prev.filter((authors) => authors.username !== username)
+                    )
+                  }
+                />
+              )}
+            >
+              <ErrorBoundary
+                shouldCatch={ZodError}
+                fallback={ZodErrorBoundaryFallback}
               >
-                🗑️
-              </button>
-            </ErrorBoundary>
+                <Suspense fallback={'loading...'}>
+                  <SuspenseQuery
+                    {...query.githubUser(username)}
+                    select={githubUserSchema.parse}
+                  >
+                    {({ data: githubUser }) => (
+                      <>{`Co-authored-by: ${realname} <${githubUser.id}+${username}@users.noreply.github.com>`}</>
+                    )}
+                  </SuspenseQuery>
+                </Suspense>
+                <button
+                  onClick={() =>
+                    setGithubCoAuthors((prev) =>
+                      prev.filter((authors) => authors.username !== username)
+                    )
+                  }
+                  style={{ fontSize: 12, userSelect: 'none', marginLeft: 8 }}
+                >
+                  🗑️
+                </button>
+              </ErrorBoundary>
+            </QueryErrorBoundary>
           </div>
         ))}
       </section>
@@ -161,15 +196,42 @@ function App() {
 
 export default App
 
-const ErrorBoundaryFallback = () => {
-  const props = useErrorBoundaryFallbackProps()
+const AxiosErrorBoundaryFallback = ({
+  username,
+  onRemove,
+}: {
+  username: string
+  onRemove: () => void
+}) => {
+  const { error } = useErrorBoundaryFallbackProps()
 
-  if (props.error instanceof ZodError) {
+  useTimeout(() => {
+    onRemove()
+  }, 1500)
+
+  if (error instanceof AxiosError) {
+    return (
+      <>
+        {username}: {error.message} (This will be disappear after 1.5s)
+        <button
+          style={{ fontSize: 12, userSelect: 'none', marginLeft: 8 }}
+          onClick={onRemove}
+        >
+          🗑️
+        </button>
+      </>
+    )
+  }
+}
+
+const ZodErrorBoundaryFallback = () => {
+  const { error } = useErrorBoundaryFallbackProps()
+  if (error instanceof ZodError) {
     return (
       <div>
         <h2>zod error</h2>
         <ul style={{ textAlign: 'left' }}>
-          {props.error.issues.map((issue) => {
+          {error.issues.map((issue) => {
             return (
               <li>
                 {issue.path}: code: {issue.code} ({issue.message})
@@ -177,10 +239,8 @@ const ErrorBoundaryFallback = () => {
             )
           })}
         </ul>
-        {JSON.stringify(props.error)}
+        {JSON.stringify(error)}
       </div>
     )
   }
-
-  return <>{JSON.stringify(props.error)}</>
 }
